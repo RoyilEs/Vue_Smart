@@ -7,7 +7,7 @@
         <div class="card-heading">
           <div>
             <h2>用户取件</h2>
-            <p>新用户：输入手机号或取件码。老用户：直接点“我的快递”。</p>
+            <p>新用户：输入手机号或取件码。老用户：直接点"我的快递"。</p>
           </div>
           <div class="heading-actions">
             <el-button plain @click="router.push('/backup')">退换包裹</el-button>
@@ -18,13 +18,13 @@
         </div>
 
         <el-alert
-          v-if="route.query.notice === 'backup-auth'"
-          class="notice-card"
-          title="退换包裹需要先完成用户验证"
-          description="请先输入手机号或取件码完成身份校验。校验成功后会自动返回退换页面。"
-          type="warning"
-          :closable="false"
-          show-icon
+            v-if="route.query.notice === 'backup-auth'"
+            class="notice-card"
+            title="退换包裹需要先完成用户验证"
+            description="请先输入手机号或取件码完成身份校验。校验成功后会自动返回退换页面。"
+            type="warning"
+            :closable="false"
+            show-icon
         />
 
         <div class="query-toolbar">
@@ -33,10 +33,10 @@
             <el-radio-button :value="'phone'">手机号</el-radio-button>
           </el-radio-group>
           <el-input
-            v-model="queryKeyword"
-            :placeholder="searchMode === 'pickupCode' ? '输入取件码' : '输入手机号'"
-            clearable
-            @keyup.enter="verifyByInput"
+              v-model="queryKeyword"
+              :placeholder="searchMode === 'pickupCode' ? '输入取件码' : '输入手机号'"
+              clearable
+              @keyup.enter="verifyByInput"
           />
           <el-button type="success" :loading="verifying" @click="verifyByInput">确认取件</el-button>
           <el-button type="primary" plain :loading="loadingPackages" @click="loadMyPackages()">我的快递</el-button>
@@ -44,13 +44,49 @@
 
         <p class="toolbar-tip">查询输入已和公共查询统一为单输入模式，可按手机号或取件码切换查询。</p>
 
-        <div class="scene-wrap">
-          <PickupScene
-            :grilles="grilles"
-            :target-package="selectedPackage"
-            :trigger-key="triggerKey"
-            @finished="completePickup"
-          />
+        <!-- 平面网格展示区 -->
+        <div class="cabinet-visual">
+          <div class="pagination-header">
+            <el-button :disabled="currentPage <= 1" @click="prevPage" size="small">
+              <el-icon><ArrowLeft /></el-icon> 上一页
+            </el-button>
+            <span class="page-info">第 {{ currentPage }} / {{ totalPages }} 页</span>
+            <el-button :disabled="currentPage >= totalPages" @click="nextPage" size="small">
+              下一页 <el-icon><ArrowRight /></el-icon>
+            </el-button>
+          </div>
+
+          <div class="status-grid" v-if="currentPageGrilles.length">
+            <div
+                v-for="item in currentPageGrilles"
+                :key="item.grille_id"
+                class="status-cell"
+                :class="[
+                getStatusClass(item.status),
+                { active: targetGrilleId === item.grille_id }
+              ]"
+            >
+              <strong>{{ item.grille_id }}</strong>
+              <span>{{ getStatusText(item.status) }}</span>
+              <small class="position">{{ item.matrix_row }}-{{ item.matrix_column }}</small>
+              <div v-if="item.logisticsId && item.logisticsId !== ''" class="package-badge">
+                📦
+              </div>
+            </div>
+          </div>
+          <el-empty v-else description="暂无格口数据" />
+
+          <div class="pagination-footer" v-if="totalPages > 1">
+            <el-pagination
+                background
+                layout="prev, pager, next"
+                :total="sortedGrilles.length"
+                :page-size="pageSize"
+                :current-page="currentPage"
+                @current-change="handlePageChange"
+                small
+            />
+          </div>
         </div>
 
         <div class="result-panel">
@@ -74,12 +110,12 @@
 
             <div v-if="packages.length" class="package-strip">
               <button
-                v-for="item in packages"
-                :key="item.logisticsId"
-                type="button"
-                class="package-chip"
-                :class="{ active: selectedPackage?.logisticsId === item.logisticsId }"
-                @click="selectedPackage = item"
+                  v-for="item in packages"
+                  :key="item.logisticsId"
+                  type="button"
+                  class="package-chip"
+                  :class="{ active: selectedPackage?.logisticsId === item.logisticsId }"
+                  @click="selectPackage(item)"
               >
                 <strong>{{ item.itemName }}</strong>
                 <span>{{ item.grille_id || '未分配' }} / {{ item.pickupCode }}</span>
@@ -94,11 +130,11 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import PublicTopNav from '../../components/PublicTopNav.vue'
-import PickupScene from '../../components/three/PickupScene.vue'
 import { createUserProfile, fetchGrilles, fetchUserItems, packageOut, verifyPickup } from '../../api'
 import { useAuthStore } from '../../stores/auth'
 
@@ -114,25 +150,65 @@ const pickuping = ref(false)
 const packages = ref([])
 const grilles = ref([])
 const selectedPackage = ref(null)
-const triggerKey = ref(0)
 const pickupResult = ref('')
 const searchMode = ref('pickupCode')
 const queryKeyword = ref('')
+const targetGrilleId = ref('')
+
+// 分页相关
+const pageSize = ref(24)
+const currentPage = ref(1)
 
 if (auth.userProfile?.phone) {
   searchMode.value = 'phone'
   queryKeyword.value = auth.userProfile.phone
 }
 
+// 排序后的格口
+const sortedGrilles = computed(() => {
+  return [...grilles.value].sort((left, right) => {
+    if (left.matrix_row !== right.matrix_row) return left.matrix_row - right.matrix_row
+    return left.matrix_column - right.matrix_column
+  })
+})
+
+const totalPages = computed(() => Math.ceil(sortedGrilles.value.length / pageSize.value))
+
+const currentPageGrilles = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return sortedGrilles.value.slice(start, end)
+})
+
 const resultMessage = computed(() => {
   if (pickupResult.value) return pickupResult.value
   if (selectedPackage.value) {
     return searchMode.value === 'pickupCode'
-      ? '已锁定目标格口，校验成功后会自动执行取件动画。'
-      : '已锁定目标格口，点击“开始取件”执行动画。'
+        ? '已锁定目标格口，校验成功后会自动执行取件动画。'
+        : '已锁定目标格口，点击"开始取件"执行取件。'
   }
   return '请先输入手机号或取件码完成校验。'
 })
+
+// 状态样式类
+function getStatusClass(status) {
+  const classMap = {
+    idle: 'status-idle',
+    occupied: 'status-occupied',
+    disabled: 'status-disabled'
+  }
+  return classMap[status] || 'status-idle'
+}
+
+// 状态显示文字
+function getStatusText(status) {
+  const textMap = {
+    idle: '空闲',
+    occupied: '占用',
+    disabled: '停用'
+  }
+  return textMap[status] || '空闲'
+}
 
 function buildPayload() {
   const keyword = queryKeyword.value.trim()
@@ -160,6 +236,25 @@ function buildPayload() {
 async function loadGrilleData() {
   const response = await fetchGrilles()
   grilles.value = response.data.list || []
+}
+
+function jumpToGrillePage(grilleId) {
+  if (!grilleId) return
+  const index = sortedGrilles.value.findIndex(g => g.grille_id === grilleId)
+  if (index !== -1) {
+    const targetPage = Math.floor(index / pageSize.value) + 1
+    if (targetPage !== currentPage.value) {
+      currentPage.value = targetPage
+    }
+  }
+}
+
+function selectPackage(pkg) {
+  selectedPackage.value = pkg
+  targetGrilleId.value = pkg.grille_id || ''
+  if (targetGrilleId.value) {
+    jumpToGrillePage(targetGrilleId.value)
+  }
 }
 
 async function verifyByInput() {
@@ -191,16 +286,29 @@ async function verifyByInput() {
     }
 
     packages.value = list
-    selectedPackage.value = payload.pickupCode
-      ? packages.value.find((item) => item.pickupCode === payload.pickupCode) || packages.value[0] || null
-      : packages.value[0] || null
+
+    let targetPkg = null
+    if (payload.pickupCode) {
+      targetPkg = packages.value.find((item) => item.pickupCode === payload.pickupCode)
+    }
+
+    if (!targetPkg && packages.value.length) {
+      targetPkg = packages.value[0]
+    }
+
+    selectedPackage.value = targetPkg || null
+    if (selectedPackage.value) {
+      targetGrilleId.value = selectedPackage.value.grille_id || ''
+      jumpToGrillePage(targetGrilleId.value)
+    }
 
     const shouldAutoPickup = Boolean(payload.pickupCode && selectedPackage.value)
     pickupResult.value = packages.value.length
-      ? shouldAutoPickup
-        ? '身份校验成功，正在为当前取件码自动开启取件流程'
-        : '身份校验成功，已同步当前用户全部待取包裹'
-      : '当前暂无待取包裹'
+        ? shouldAutoPickup
+            ? '身份校验成功，正在为当前取件码自动开启取件流程'
+            : '身份校验成功，已同步当前用户全部待取包裹'
+        : '当前暂无待取包裹'
+
     await loadGrilleData()
 
     if (route.query.redirect) {
@@ -242,6 +350,10 @@ async function loadMyPackages(options = {}) {
     const response = await fetchUserItems(phone)
     packages.value = response.data.list || []
     selectedPackage.value = packages.value[0] || null
+    if (selectedPackage.value) {
+      targetGrilleId.value = selectedPackage.value.grille_id || ''
+      jumpToGrillePage(targetGrilleId.value)
+    }
     if (!preserveMessage) {
       pickupResult.value = packages.value.length ? '已加载当前用户待取包裹' : '当前暂无待取包裹'
     }
@@ -263,9 +375,25 @@ function startPickup() {
     return
   }
 
+  if (!selectedPackage.value.grille_id) {
+    ElMessage.warning('该包裹尚未分配格口')
+    return
+  }
+
   pickuping.value = true
   pickupResult.value = ''
-  triggerKey.value += 1
+  // 触发取件动画效果
+  flashTargetGrille()
+}
+
+function flashTargetGrille() {
+  targetGrilleId.value = selectedPackage.value.grille_id
+  jumpToGrillePage(targetGrilleId.value)
+
+  // 高亮闪烁效果
+  setTimeout(() => {
+    completePickup()
+  }, 1500)
 }
 
 async function autoStartPickup() {
@@ -282,13 +410,44 @@ async function completePickup() {
     const grilleId = selectedPackage.value.grille_id
     await packageOut({ logistics_ids: [selectedPackage.value.logisticsId] })
     pickupResult.value = `${packageName} 已从 ${grilleId} 成功取出`
+
+    // 刷新格口状态
+    await loadGrilleData()
+    // 刷新包裹列表
     await loadMyPackages({ silent: true, preserveMessage: true })
+
+    // 清空高亮
+    targetGrilleId.value = ''
   } catch (error) {
     ElMessage.error(error?.response?.data?.msg || error?.message || '出库失败')
   } finally {
     pickuping.value = false
   }
 }
+
+function prevPage() {
+  if (currentPage.value > 1) {
+    currentPage.value--
+  }
+}
+
+function nextPage() {
+  if (currentPage.value < totalPages.value) {
+    currentPage.value++
+  }
+}
+
+function handlePageChange(page) {
+  currentPage.value = page
+}
+
+// 监听选中包裹变化，自动跳转到对应格口所在页
+watch(selectedPackage, (newPkg) => {
+  if (newPkg?.grille_id) {
+    targetGrilleId.value = newPkg.grille_id
+    jumpToGrillePage(newPkg.grille_id)
+  }
+})
 
 onMounted(async () => {
   try {
@@ -357,9 +516,119 @@ onMounted(async () => {
   font-size: 13px;
 }
 
-.scene-wrap {
+/* 柜体可视化区域 */
+.cabinet-visual {
+  background: #f8fafc;
+  border-radius: 16px;
+  padding: 16px;
+  border: 1px solid var(--line-color);
+  margin-bottom: 20px;
+}
+
+.pagination-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-color);
+}
+
+.page-info {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  min-height: 320px;
+}
+
+.status-cell {
+  border: 2px solid var(--line-color);
   border-radius: 10px;
-  overflow: hidden;
+  padding: 12px 6px;
+  background: #fff;
+  transition: all 0.18s ease;
+  text-align: center;
+  position: relative;
+}
+
+.status-cell strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.status-cell span {
+  display: block;
+  font-size: 11px;
+}
+
+.status-cell .position {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.status-cell.active {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3);
+  animation: pulse 0.5s ease-in-out;
+}
+
+.package-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 14px;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+    background-color: #fef3c7;
+  }
+}
+
+.status-idle {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+.status-idle strong {
+  color: #15803d;
+}
+
+.status-occupied {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+.status-occupied strong {
+  color: #1e40af;
+}
+
+.status-disabled {
+  background: #fee2e2;
+  border-color: #fecaca;
+}
+.status-disabled strong {
+  color: #b91c1c;
+}
+
+.pagination-footer {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-color);
+  display: flex;
+  justify-content: center;
 }
 
 .result-panel {
@@ -443,6 +712,10 @@ onMounted(async () => {
   .heading-actions {
     width: 100%;
     flex-direction: column;
+  }
+
+  .status-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 </style>

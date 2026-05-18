@@ -93,7 +93,7 @@ export function fetchPackageLogs(id) {
 }
 
 export function createUserProfile(payload) {
-  return http.post('/user_create', payload, {
+  return http.post('/user_smart_create', payload, {
     headers: { 'X-User-Scene': 'user' }
   })
 }
