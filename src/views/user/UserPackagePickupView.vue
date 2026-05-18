@@ -11,8 +11,19 @@
           </div>
           <div class="heading-actions">
             <el-button plain @click="router.push('/backup')">退换包裹</el-button>
-            <el-button type="primary" :disabled="!selectedPackage || pickuping" @click="startPickup">
-              {{ pickuping ? '取件中...' : '开始取件' }}
+            <el-button
+                v-if="packages.length > 0 && getSelectablePackages().length > 0"
+                plain
+                @click="selectAllPackages"
+            >
+              {{ isAllSelected ? '取消全选' : '全选' }}
+            </el-button>
+            <el-button
+                type="primary"
+                :disabled="!selectedPackages.length || pickuping"
+                @click="batchPickup"
+            >
+              {{ pickuping ? '取件中...' : `批量取件 (${selectedPackages.length})` }}
             </el-button>
           </div>
         </div>
@@ -89,39 +100,105 @@
           </div>
         </div>
 
+        <!-- 取件结果和待取包裹区域 -->
         <div class="result-panel">
+          <!-- 取件结果 -->
           <section class="result-main">
-            <h3>取件结果</h3>
-            <p class="result-message">{{ resultMessage }}</p>
+            <h3>📋 取件结果</h3>
+            <div class="result-content">
+              <div v-if="pickupResult" class="result-message" :class="{ success: pickupSuccess, error: !pickupSuccess }">
+                {{ pickupResult }}
+              </div>
+              <div v-else class="result-message info">
+                请先选择包裹并点击"批量取件"
+              </div>
 
-            <el-descriptions v-if="selectedPackage" :column="1" border>
-              <el-descriptions-item label="包裹名称">{{ selectedPackage.itemName }}</el-descriptions-item>
-              <el-descriptions-item label="物流单号">{{ selectedPackage.logisticsId }}</el-descriptions-item>
-              <el-descriptions-item label="收件手机号">{{ selectedPackage.receiverPhone }}</el-descriptions-item>
-              <el-descriptions-item label="目标格口">{{ selectedPackage.grille_id || '未分配' }}</el-descriptions-item>
-            </el-descriptions>
+              <el-descriptions v-if="selectedPackages.length === 1" :column="1" border class="package-detail">
+                <el-descriptions-item label="包裹名称">
+                  <strong>{{ selectedPackages[0]?.itemName || selectedPackages[0]?.item_name || '-' }}</strong>
+                </el-descriptions-item>
+                <el-descriptions-item label="物流单号">{{ selectedPackages[0]?.logisticsId || selectedPackages[0]?.logistics_id || '-' }}</el-descriptions-item>
+                <el-descriptions-item label="收件手机号">{{ selectedPackages[0]?.receiverPhone || selectedPackages[0]?.receiver_phone || '-' }}</el-descriptions-item>
+                <el-descriptions-item label="取件码">
+                  <span class="pickup-code">{{ selectedPackages[0]?.pickupCode || selectedPackages[0]?.pickup_code || '-' }}</span>
+                </el-descriptions-item>
+                <el-descriptions-item label="目标格口">
+                  <span class="grille-highlight">{{ selectedPackages[0]?.grille_id || '未分配' }}</span>
+                </el-descriptions-item>
+                <el-descriptions-item label="入柜时间">{{ selectedPackages[0]?.inbound_at || selectedPackages[0]?.created_at || '-' }}</el-descriptions-item>
+              </el-descriptions>
+              <div v-else-if="selectedPackages.length > 1" class="multi-select-info">
+                <el-alert
+                    :title="`已选中 ${selectedPackages.length} 个包裹`"
+                    type="info"
+                    :closable="false"
+                    show-icon
+                >
+                  <template #default>
+                    <div class="multi-select-list">
+                      <div v-for="pkg in selectedPackages" :key="pkg.logisticsId" class="multi-select-item">
+                        {{ pkg.itemName || pkg.item_name }} - {{ pkg.grille_id || '未分配' }}
+                      </div>
+                    </div>
+                  </template>
+                </el-alert>
+              </div>
+              <el-empty v-else description="暂无选中包裹" :image-size="80" />
+            </div>
           </section>
 
+          <!-- 待取包裹列表 -->
           <section class="result-side">
             <div class="side-head">
-              <h3>待取包裹</h3>
-              <span>{{ packages.length }} 件</span>
+              <h3>📦 待取包裹</h3>
+              <div class="side-head-right">
+                <el-badge :value="getSelectablePackages().length" :hidden="!getSelectablePackages().length" type="primary">
+                  <span class="package-count">待取: {{ getSelectablePackages().length }}</span>
+                </el-badge>
+                <span class="package-divider">|</span>
+                <span class="package-count">已取: {{ getPickedPackages().length }}</span>
+              </div>
             </div>
 
             <div v-if="packages.length" class="package-strip">
-              <button
+              <div
                   v-for="item in packages"
-                  :key="item.logisticsId"
-                  type="button"
+                  :key="item.logisticsId || item.logistics_id"
                   class="package-chip"
-                  :class="{ active: selectedPackage?.logisticsId === item.logisticsId }"
-                  @click="selectPackage(item)"
+                  :class="{
+                  active: selectedPackages.some(p => (p.logisticsId || p.logistics_id) === (item.logisticsId || item.logistics_id)),
+                  picked: item.status === 'picked_up'
+                }"
+                  @click="togglePackageSelection(item)"
               >
-                <strong>{{ item.itemName }}</strong>
-                <span>{{ item.grille_id || '未分配' }} / {{ item.pickupCode }}</span>
-              </button>
+                <div class="package-chip-header">
+                  <el-checkbox
+                      :model-value="selectedPackages.some(p => (p.logisticsId || p.logistics_id) === (item.logisticsId || item.logistics_id))"
+                      :disabled="item.status === 'picked_up'"
+                      @click.stop
+                      @change="() => togglePackageSelection(item)"
+                  />
+                  <strong>{{ item.itemName || item.item_name || '未命名包裹' }}</strong>
+                  <span class="status-badge" :class="getPackageStatusClass(item.status)">
+                    {{ getPackageStatusText(item.status) }}
+                  </span>
+                </div>
+                <div class="package-chip-info">
+                  <template v-if="item.status !== 'picked_up'">
+                    <span>格口: {{ item.grille_id || '未分配' }}</span>
+                    <span>取件码: {{ item.pickupCode || item.pickup_code || '-' }}</span>
+                  </template>
+                  <template v-else>
+                    <span class="picked-info">✓ 已取件</span>
+                  </template>
+                </div>
+              </div>
             </div>
-            <el-empty v-else description="暂无待取包裹" :image-size="70" />
+            <el-empty v-else description="暂无待取包裹" :image-size="100">
+              <template #description>
+                <span>暂无待取包裹<br>请先输入手机号或取件码验证</span>
+              </template>
+            </el-empty>
           </section>
         </div>
       </section>
@@ -144,13 +221,15 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
+// 响应式数据
 const verifying = ref(false)
 const loadingPackages = ref(false)
 const pickuping = ref(false)
 const packages = ref([])
 const grilles = ref([])
-const selectedPackage = ref(null)
+const selectedPackages = ref([])
 const pickupResult = ref('')
+const pickupSuccess = ref(false)
 const searchMode = ref('pickupCode')
 const queryKeyword = ref('')
 const targetGrilleId = ref('')
@@ -164,7 +243,7 @@ if (auth.userProfile?.phone) {
   queryKeyword.value = auth.userProfile.phone
 }
 
-// 排序后的格口
+// 计算属性
 const sortedGrilles = computed(() => {
   return [...grilles.value].sort((left, right) => {
     if (left.matrix_row !== right.matrix_row) return left.matrix_row - right.matrix_row
@@ -180,17 +259,12 @@ const currentPageGrilles = computed(() => {
   return sortedGrilles.value.slice(start, end)
 })
 
-const resultMessage = computed(() => {
-  if (pickupResult.value) return pickupResult.value
-  if (selectedPackage.value) {
-    return searchMode.value === 'pickupCode'
-        ? '已锁定目标格口，校验成功后会自动执行取件动画。'
-        : '已锁定目标格口，点击"开始取件"执行取件。'
-  }
-  return '请先输入手机号或取件码完成校验。'
+const isAllSelected = computed(() => {
+  const selectable = getSelectablePackages()
+  return selectable.length > 0 && selectedPackages.value.length === selectable.length
 })
 
-// 状态样式类
+// 辅助函数
 function getStatusClass(status) {
   const classMap = {
     idle: 'status-idle',
@@ -200,7 +274,6 @@ function getStatusClass(status) {
   return classMap[status] || 'status-idle'
 }
 
-// 状态显示文字
 function getStatusText(status) {
   const textMap = {
     idle: '空闲',
@@ -208,6 +281,32 @@ function getStatusText(status) {
     disabled: '停用'
   }
   return textMap[status] || '空闲'
+}
+
+function getPackageStatusClass(status) {
+  const classMap = {
+    created: 'status-created',
+    stored: 'status-stored',
+    picked_up: 'status-picked'
+  }
+  return classMap[status] || 'status-created'
+}
+
+function getPackageStatusText(status) {
+  const textMap = {
+    created: '待入柜',
+    stored: '待取件',
+    picked_up: '已取件'
+  }
+  return textMap[status] || '处理中'
+}
+
+function getSelectablePackages() {
+  return packages.value.filter(p => p.status !== 'picked_up')
+}
+
+function getPickedPackages() {
+  return packages.value.filter(p => p.status === 'picked_up')
 }
 
 function buildPayload() {
@@ -233,9 +332,16 @@ function buildPayload() {
   return { phone, pickupCode }
 }
 
+// 数据加载函数
 async function loadGrilleData() {
-  const response = await fetchGrilles()
-  grilles.value = response.data.list || []
+  try {
+    const response = await fetchGrilles()
+    grilles.value = response.data?.list || []
+    console.log('格口数据加载完成:', grilles.value.length)
+  } catch (error) {
+    console.error('加载格口数据失败:', error)
+    ElMessage.error(error?.response?.data?.msg || error?.message || '格口数据加载失败')
+  }
 }
 
 function jumpToGrillePage(grilleId) {
@@ -249,11 +355,151 @@ function jumpToGrillePage(grilleId) {
   }
 }
 
-function selectPackage(pkg) {
-  selectedPackage.value = pkg
-  targetGrilleId.value = pkg.grille_id || ''
-  if (targetGrilleId.value) {
-    jumpToGrillePage(targetGrilleId.value)
+// 包裹选择相关函数
+function togglePackageSelection(pkg) {
+  const pkgId = pkg.logisticsId || pkg.logistics_id
+
+  // 已取件的包裹不可选择
+  if (pkg.status === 'picked_up') {
+    ElMessage.warning('该包裹已完成取件，不可重复选择')
+    return
+  }
+
+  const index = selectedPackages.value.findIndex(p => (p.logisticsId || p.logistics_id) === pkgId)
+  if (index === -1) {
+    selectedPackages.value.push(pkg)
+    ElMessage.success(`已选中包裹: ${pkg.itemName || pkg.item_name}`)
+    // 如果只选中一个，跳转到对应格口
+    if (selectedPackages.value.length === 1 && pkg.grille_id) {
+      targetGrilleId.value = pkg.grille_id
+      jumpToGrillePage(pkg.grille_id)
+    }
+  } else {
+    selectedPackages.value.splice(index, 1)
+    ElMessage.info(`已取消选中包裹: ${pkg.itemName || pkg.item_name}`)
+    // 如果没有选中包裹，清除高亮
+    if (selectedPackages.value.length === 0) {
+      targetGrilleId.value = ''
+    } else if (selectedPackages.value.length === 1 && selectedPackages.value[0].grille_id) {
+      targetGrilleId.value = selectedPackages.value[0].grille_id
+      jumpToGrillePage(selectedPackages.value[0].grille_id)
+    }
+  }
+}
+
+// 全选/取消全选
+function selectAllPackages() {
+  const selectablePackages = getSelectablePackages()
+  if (isAllSelected.value) {
+    selectedPackages.value = []
+    ElMessage.info('已取消全选')
+  } else {
+    selectedPackages.value = [...selectablePackages]
+    ElMessage.success(`已选中 ${selectedPackages.value.length} 个包裹`)
+    // 如果有选中的包裹，跳转到第一个的格口
+    if (selectedPackages.value[0]?.grille_id) {
+      targetGrilleId.value = selectedPackages.value[0].grille_id
+      jumpToGrillePage(selectedPackages.value[0].grille_id)
+    }
+  }
+}
+
+// 批量取件
+async function batchPickup() {
+  if (!selectedPackages.value.length) {
+    ElMessage.warning('请先选择要取出的包裹')
+    return
+  }
+
+  const invalidPackages = selectedPackages.value.filter(p => !p.grille_id)
+  if (invalidPackages.length) {
+    ElMessage.warning(`${invalidPackages.map(p => p.itemName || p.item_name).join(', ')} 尚未分配格口，无法取件`)
+    return
+  }
+
+  pickuping.value = true
+  pickupResult.value = ''
+
+  try {
+    const logisticsIds = selectedPackages.value.map(p => p.logisticsId || p.logistics_id)
+    await packageOut({ logistics_ids: logisticsIds })
+
+    pickupResult.value = `✅ 成功取出 ${selectedPackages.value.length} 个包裹！`
+    pickupSuccess.value = true
+
+    // 刷新数据
+    await loadGrilleData()
+    await loadMyPackages({ silent: true, preserveMessage: true })
+
+    // 清空选中
+    selectedPackages.value = []
+    targetGrilleId.value = ''
+
+    ElMessage.success(`成功取出 ${logisticsIds.length} 个包裹！`)
+  } catch (error) {
+    console.error('取件失败:', error)
+    pickupResult.value = `❌ 取件失败: ${error?.response?.data?.msg || error?.message || '请重试'}`
+    pickupSuccess.value = false
+    ElMessage.error(error?.response?.data?.msg || error?.message || '取件失败')
+  } finally {
+    pickuping.value = false
+  }
+}
+
+async function loadMyPackages(options = {}) {
+  const { silent = false, preserveMessage = false } = options
+  const phone = auth.userProfile?.phone || queryKeyword.value.trim()
+
+  if (!phone) {
+    if (!silent) ElMessage.warning('请先输入手机号或完成一次取件校验')
+    return false
+  }
+
+  if (!phonePattern.test(phone)) {
+    if (!silent) ElMessage.warning('请输入合法的 11 位手机号')
+    return false
+  }
+
+  loadingPackages.value = true
+  try {
+    const response = await fetchUserItems(phone)
+    packages.value = response.data?.list || []
+
+    console.log('包裹数据加载完成:', packages.value)
+
+    if (packages.value.length) {
+      // 默认选中第一个未取件的包裹
+      const firstSelectable = packages.value.find(p => p.status !== 'picked_up')
+      if (firstSelectable && selectedPackages.value.length === 0) {
+        selectedPackages.value = [firstSelectable]
+        if (firstSelectable.grille_id) {
+          targetGrilleId.value = firstSelectable.grille_id
+          jumpToGrillePage(targetGrilleId.value)
+        }
+      }
+    } else {
+      selectedPackages.value = []
+      targetGrilleId.value = ''
+    }
+
+    if (!preserveMessage) {
+      const selectableCount = getSelectablePackages().length
+      pickupResult.value = selectableCount > 0
+          ? `✅ 已加载 ${selectableCount} 个待取包裹，请选择包裹后点击"批量取件"`
+          : '⚠️ 当前暂无待取包裹'
+      pickupSuccess.value = selectableCount > 0
+    }
+
+    await loadGrilleData()
+    return true
+  } catch (error) {
+    console.error('加载包裹失败:', error)
+    if (!silent) {
+      ElMessage.error(error?.response?.data?.msg || error?.message || '查询失败')
+    }
+    return false
+  } finally {
+    loadingPackages.value = false
   }
 }
 
@@ -279,35 +525,53 @@ async function verifyByInput() {
     let list = []
     if (profile?.phone) {
       const response = await fetchUserItems(profile.phone)
-      list = response.data.list || []
+      list = response.data?.list || []
     } else {
       const response = await verifyPickup(payload)
-      list = response.data.list || []
+      list = response.data?.list || []
     }
 
     packages.value = list
 
     let targetPkg = null
     if (payload.pickupCode) {
-      targetPkg = packages.value.find((item) => item.pickupCode === payload.pickupCode)
+      targetPkg = packages.value.find((item) => (item.pickupCode || item.pickup_code) === payload.pickupCode)
     }
 
-    if (!targetPkg && packages.value.length) {
-      targetPkg = packages.value[0]
+    if (targetPkg && targetPkg.status !== 'picked_up') {
+      selectedPackages.value = [targetPkg]
+      if (targetPkg.grille_id) {
+        targetGrilleId.value = targetPkg.grille_id
+        jumpToGrillePage(targetGrilleId.value)
+      }
+    } else if (packages.value.length) {
+      const firstSelectable = packages.value.find(p => p.status !== 'picked_up')
+      if (firstSelectable) {
+        selectedPackages.value = [firstSelectable]
+        if (firstSelectable.grille_id) {
+          targetGrilleId.value = firstSelectable.grille_id
+          jumpToGrillePage(targetGrilleId.value)
+        }
+      } else {
+        selectedPackages.value = []
+      }
+    } else {
+      selectedPackages.value = []
+      targetGrilleId.value = ''
     }
 
-    selectedPackage.value = targetPkg || null
-    if (selectedPackage.value) {
-      targetGrilleId.value = selectedPackage.value.grille_id || ''
-      jumpToGrillePage(targetGrilleId.value)
-    }
+    const shouldAutoPickup = Boolean(payload.pickupCode && targetPkg && targetPkg.status !== 'picked_up')
+    const selectableCount = getSelectablePackages().length
 
-    const shouldAutoPickup = Boolean(payload.pickupCode && selectedPackage.value)
-    pickupResult.value = packages.value.length
-        ? shouldAutoPickup
-            ? '身份校验成功，正在为当前取件码自动开启取件流程'
-            : '身份校验成功，已同步当前用户全部待取包裹'
-        : '当前暂无待取包裹'
+    if (selectableCount > 0) {
+      pickupResult.value = shouldAutoPickup
+          ? `✅ 身份校验成功，找到 ${selectableCount} 个包裹，正在自动开启取件...`
+          : `✅ 身份校验成功，已同步 ${selectableCount} 个待取包裹`
+      pickupSuccess.value = true
+    } else {
+      pickupResult.value = packages.value.length > 0 ? '⚠️ 所有包裹均已取件' : '⚠️ 身份校验成功，但当前暂无待取包裹'
+      pickupSuccess.value = false
+    }
 
     await loadGrilleData()
 
@@ -318,110 +582,18 @@ async function verifyByInput() {
 
     if (shouldAutoPickup) {
       ElMessage.success('身份校验成功，已自动开始取件')
-      await autoStartPickup()
+      await batchPickup()
       return
     }
 
     ElMessage.success('包裹校验成功')
   } catch (error) {
+    console.error('校验失败:', error)
+    pickupResult.value = `❌ 校验失败: ${error?.response?.data?.msg || error?.message || '请重试'}`
+    pickupSuccess.value = false
     ElMessage.error(error?.response?.data?.msg || error?.message || '校验失败')
   } finally {
     verifying.value = false
-  }
-}
-
-async function loadMyPackages(options = {}) {
-  const { silent = false, preserveMessage = false } = options
-  const currentKeyword = queryKeyword.value.trim()
-  const phone = (auth.userProfile?.phone || (searchMode.value === 'phone' ? currentKeyword : '') || '').trim()
-
-  if (!phone) {
-    if (!silent) ElMessage.warning('请先输入手机号或完成一次取件校验')
-    return false
-  }
-
-  if (!phonePattern.test(phone)) {
-    if (!silent) ElMessage.warning('请输入合法的 11 位手机号')
-    return false
-  }
-
-  loadingPackages.value = true
-  try {
-    const response = await fetchUserItems(phone)
-    packages.value = response.data.list || []
-    selectedPackage.value = packages.value[0] || null
-    if (selectedPackage.value) {
-      targetGrilleId.value = selectedPackage.value.grille_id || ''
-      jumpToGrillePage(targetGrilleId.value)
-    }
-    if (!preserveMessage) {
-      pickupResult.value = packages.value.length ? '已加载当前用户待取包裹' : '当前暂无待取包裹'
-    }
-    await loadGrilleData()
-    return true
-  } catch (error) {
-    if (!silent) {
-      ElMessage.error(error?.response?.data?.msg || error?.message || '查询失败')
-    }
-    return false
-  } finally {
-    loadingPackages.value = false
-  }
-}
-
-function startPickup() {
-  if (!selectedPackage.value) {
-    ElMessage.warning('请先选择要取出的包裹')
-    return
-  }
-
-  if (!selectedPackage.value.grille_id) {
-    ElMessage.warning('该包裹尚未分配格口')
-    return
-  }
-
-  pickuping.value = true
-  pickupResult.value = ''
-  // 触发取件动画效果
-  flashTargetGrille()
-}
-
-function flashTargetGrille() {
-  targetGrilleId.value = selectedPackage.value.grille_id
-  jumpToGrillePage(targetGrilleId.value)
-
-  // 高亮闪烁效果
-  setTimeout(() => {
-    completePickup()
-  }, 1500)
-}
-
-async function autoStartPickup() {
-  if (!selectedPackage.value || pickuping.value) return
-  await nextTick()
-  startPickup()
-}
-
-async function completePickup() {
-  if (!selectedPackage.value) return
-
-  try {
-    const packageName = selectedPackage.value.itemName
-    const grilleId = selectedPackage.value.grille_id
-    await packageOut({ logistics_ids: [selectedPackage.value.logisticsId] })
-    pickupResult.value = `${packageName} 已从 ${grilleId} 成功取出`
-
-    // 刷新格口状态
-    await loadGrilleData()
-    // 刷新包裹列表
-    await loadMyPackages({ silent: true, preserveMessage: true })
-
-    // 清空高亮
-    targetGrilleId.value = ''
-  } catch (error) {
-    ElMessage.error(error?.response?.data?.msg || error?.message || '出库失败')
-  } finally {
-    pickuping.value = false
   }
 }
 
@@ -441,24 +613,19 @@ function handlePageChange(page) {
   currentPage.value = page
 }
 
-// 监听选中包裹变化，自动跳转到对应格口所在页
-watch(selectedPackage, (newPkg) => {
-  if (newPkg?.grille_id) {
-    targetGrilleId.value = newPkg.grille_id
-    jumpToGrillePage(newPkg.grille_id)
-  }
-})
-
+// 初始化
 onMounted(async () => {
   try {
     await loadGrilleData()
+
     if (auth.userProfile?.phone) {
       searchMode.value = 'phone'
       queryKeyword.value = auth.userProfile.phone
       await loadMyPackages({ silent: true })
     }
   } catch (error) {
-    ElMessage.error(error?.response?.data?.msg || error?.message || '格口数据加载失败')
+    console.error('初始化失败:', error)
+    ElMessage.error(error?.response?.data?.msg || error?.message || '数据加载失败')
   }
 })
 </script>
@@ -482,6 +649,7 @@ onMounted(async () => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 .card-heading h2 {
@@ -497,6 +665,7 @@ onMounted(async () => {
 .heading-actions {
   display: flex;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .notice-card {
@@ -516,7 +685,6 @@ onMounted(async () => {
   font-size: 13px;
 }
 
-/* 柜体可视化区域 */
 .cabinet-visual {
   background: #f8fafc;
   border-radius: 16px;
@@ -634,7 +802,7 @@ onMounted(async () => {
 .result-panel {
   margin-top: 18px;
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
   gap: 18px;
 }
 
@@ -648,13 +816,73 @@ onMounted(async () => {
 
 .result-main h3,
 .result-side h3 {
-  margin: 0;
+  margin: 0 0 16px 0;
   font-size: 18px;
 }
 
+.result-content {
+  min-height: 300px;
+}
+
 .result-message {
-  margin: 12px 0 16px;
-  color: var(--text-muted);
+  margin: 0 0 16px 0;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.result-message.success {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+.result-message.error {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.result-message.info {
+  background: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+}
+
+.package-detail {
+  margin-top: 12px;
+}
+
+.pickup-code {
+  font-family: monospace;
+  font-size: 16px;
+  font-weight: bold;
+  color: #f59e0b;
+}
+
+.grille-highlight {
+  font-weight: bold;
+  color: #2563eb;
+}
+
+.multi-select-info {
+  margin-top: 12px;
+}
+
+.multi-select-list {
+  margin-top: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.multi-select-item {
+  padding: 4px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--line-color);
+}
+
+.multi-select-item:last-child {
+  border-bottom: none;
 }
 
 .side-head {
@@ -662,43 +890,111 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
-.side-head span {
+.side-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.package-divider {
+  color: var(--line-color);
+}
+
+.package-count {
+  font-size: 14px;
   color: var(--text-muted);
-  font-size: 13px;
 }
 
 .package-strip {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
 }
 
 .package-chip {
-  border: 1px solid var(--line-color);
-  border-radius: 10px;
+  border: 2px solid var(--line-color);
+  border-radius: 12px;
   background: #fff;
-  padding: 14px;
-  text-align: left;
+  padding: 12px;
   cursor: pointer;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  transition: all 0.2s ease;
 }
 
-.package-chip strong,
-.package-chip span {
-  display: block;
+.package-chip:hover:not(.picked) {
+  transform: translateX(4px);
+  border-color: #2563eb;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
 }
 
-.package-chip span {
-  margin-top: 8px;
-  color: var(--text-muted);
-  font-size: 13px;
+.package-chip.picked {
+  background: #f1f5f9;
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.package-chip.picked .package-chip-header strong {
+  text-decoration: line-through;
+  color: #94a3b8;
 }
 
 .package-chip.active {
   border-color: #2563eb;
-  box-shadow: inset 0 0 0 1px #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.package-chip-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.package-chip-header strong {
+  flex: 1;
+  font-size: 14px;
+  color: #1e293b;
+}
+
+.status-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.status-badge.status-created {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.status-badge.status-stored {
+  background: #dbeafe;
+  color: #2563eb;
+}
+
+.status-badge.status-picked {
+  background: #dcfce7;
+  color: #059669;
+}
+
+.package-chip-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 28px;
+}
+
+.picked-info {
+  color: #059669;
+  font-style: italic;
 }
 
 @media (max-width: 980px) {
@@ -711,11 +1007,20 @@ onMounted(async () => {
 
   .heading-actions {
     width: 100%;
-    flex-direction: column;
   }
 
   .status-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .result-panel {
+    grid-template-columns: 1fr;
   }
 }
 </style>
