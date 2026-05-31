@@ -88,8 +88,8 @@ export function updatePackage(id, payload) {
   return http.put(`/packages/${id}`, payload)
 }
 
-export function fetchPackageLogs(id) {
-  return http.get(`/packages/${id}/logs`)
+export function fetchPackageLogs(params) {
+  return http.get(`/packages/logs`, { params })
 }
 
 export function createUserProfile(payload) {

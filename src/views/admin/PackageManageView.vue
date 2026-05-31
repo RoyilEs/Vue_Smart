@@ -96,6 +96,10 @@ const filters = reactive({
   status: ''
 })
 
+const log_id = reactive({
+  id: ''
+})
+
 const pagination = reactive({
   page: 1,
   pageSize: 8
@@ -183,8 +187,10 @@ async function submitEdit() {
 async function openLogs(row) {
   logLoading.value = true
   logVisible.value = true
+  log_id.id = row.logisticsId
+  console.log(log_id)
   try {
-    const response = await fetchPackageLogs(row.ID)
+    const response = await fetchPackageLogs({ id: log_id.id })
     logs.value = response.data.list
   } catch (error) {
     ElMessage.error(error?.response?.data?.msg || error?.message || '日志加载失败')
