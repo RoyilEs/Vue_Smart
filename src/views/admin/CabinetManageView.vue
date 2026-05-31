@@ -76,8 +76,6 @@
             <el-descriptions-item label="格口">{{ selectedGrille.id }}</el-descriptions-item>
             <el-descriptions-item label="尺寸">{{ selectedGrille.sizeType || selectedGrille.size }}</el-descriptions-item>
             <el-descriptions-item label="状态">{{ selectedGrille.status }}</el-descriptions-item>
-            <el-descriptions-item label="占用物流">{{ selectedGrille.currentLogisticsId || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="所在柜体">{{ selectedGrille.cabinetLetter }}</el-descriptions-item>
             <el-descriptions-item label="位置" v-if="selectedGrille.matrixRow && selectedGrille.matrixColumn">
               {{ selectedGrille.matrixRow }} 行, {{ selectedGrille.matrixColumn }} 列
             </el-descriptions-item>
@@ -193,7 +191,7 @@ const batchOptions = [
 
 // 辅助函数：获取柜子首字母
 const getCabinetLetter = (grille) => {
-  const cabinetId = grille.cabinet_id || grille.cabinetId || grille.cabinetId || ''
+  const cabinetId = grille.cabinet_id || grille.cabinet_id || grille.cabinetId || ''
   const match = cabinetId.match(/^([A-Z])/)
   return match ? match[1] : '默认'
 }
@@ -220,6 +218,7 @@ const cabinetList = computed(() => {
       displayId: g.id || g.grille_id || `${g.matrixRow || g.matrix_row || 1}-${g.matrixColumn || g.matrix_column || 1}`,
       sizeType: g.sizeType || g.size,
       status: g.status,
+      logisticsId: g.logisticsId,
       matrixRow: g.matrixRow || g.matrix_row,
       matrixColumn: g.matrixColumn || g.matrix_column
     }
@@ -269,13 +268,13 @@ const getStatusText = (status) => {
 }
 
 const getSizeClass = (grille) => {
-  const size = grille.sizeType || grille.size
+  const size = grille.size_type || grille.size
   const classMap = { 'small': 'size-small', 'medium': 'size-medium', 'large': 'size-large' }
   return classMap[size] || 'size-medium'
 }
 
 const getSizeLabel = (grille) => {
-  const size = grille.sizeType || grille.size
+  const size = grille.size_type || grille.size
   const labelMap = { 'small': '小', 'medium': '中', 'large': '大' }
   return labelMap[size] || '中'
 }
@@ -288,13 +287,15 @@ async function loadGrilles() {
   loading.value = true
   try {
     const response = await fetchGrilles()
+    console.log(response)
     const list = response.data.list || []
     grilles.value = list.map(item => ({
       ...item,
       id: item.id || item.grille_id,
-      sizeType: item.sizeType || item.size,
+      sizeType: item.size_type || item.size,
       matrixRow: item.matrixRow || item.matrix_row,
       matrixColumn: item.matrixColumn || item.matrix_column,
+      logisticsId: item.logisticsId,
       cabinetId: item.cabinetId || item.cabinet_id
     }))
 
