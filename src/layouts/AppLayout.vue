@@ -63,7 +63,7 @@
 <script setup>
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Box, Setting, User, Van } from '@element-plus/icons-vue'
+import { Box, Setting, User, Van, Edit } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
@@ -74,6 +74,7 @@ const adminMenus = [
   { path: '/admin/users', label: '用户管理', icon: User },
   { path: '/admin/cabinets', label: '快递柜管理', icon: Box },
   { path: '/admin/packages', label: '包裹管理', icon: Van },
+  {path: '/admin/echarts', label: '数据报表', icon: Edit},
   { path: '/admin/settings', label: '系统设置', icon: Setting }
 ]
 

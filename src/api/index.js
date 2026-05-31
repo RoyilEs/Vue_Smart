@@ -92,6 +92,10 @@ export function fetchPackageLogs(params) {
   return http.get(`/packages/logs`, { params })
 }
 
+export function fetchPackageAllLogs() {
+  return http.get(`/packages_logs`)
+}
+
 export function createUserProfile(payload) {
   return http.post('/user_smart_create', payload, {
     headers: { 'X-User-Scene': 'user' }

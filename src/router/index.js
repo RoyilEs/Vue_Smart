@@ -53,6 +53,12 @@ const routes = [
         meta: { roles: ['admin'], title: '包裹管理' }
       },
       {
+        path: 'echarts',
+        name: 'admin-echarts',
+        component: () => import('../views/admin/EchartsManageView.vue'),
+        meta: {roles: ['admin'], title: '数据报表'}
+      },
+      {
         path: 'settings',
         name: 'admin-settings',
         component: () => import('../views/admin/SettingsView.vue'),
