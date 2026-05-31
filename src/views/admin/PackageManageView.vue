@@ -30,22 +30,38 @@
           </template>
         </el-table-column>
         <el-table-column prop="grille_id" label="格口" min-width="120" />
-        <el-table-column label="操作" fixed="right" width="280">
+        <el-table-column label="操作" fixed="right" width="360">
           <template #default="{ row }">
             <el-button text @click="openEdit(row)">编辑</el-button>
             <el-button text @click="openLogs(row)">记录</el-button>
-            <el-button text type="danger" :disabled="row.status !== 'stored'" @click="forceOut(row)">强制出库</el-button>
+            <el-button
+                text
+                type="success"
+                :disabled="row.status !== 'created'"
+                @click="assignToGrille(row)"
+                :loading="assignLoading && assigningId === row.logisticsId"
+            >
+              入柜
+            </el-button>
+            <el-button
+                text
+                type="danger"
+                :disabled="row.status !== 'stored'"
+                @click="forceOut(row)"
+            >
+              强制出库
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
 
       <div class="list-footer">
         <el-pagination
-          v-model:current-page="pagination.page"
-          v-model:page-size="pagination.pageSize"
-          background
-          layout="total, prev, pager, next"
-          :total="packages.length"
+            v-model:current-page="pagination.page"
+            v-model:page-size="pagination.pageSize"
+            background
+            layout="total, prev, pager, next"
+            :total="packages.length"
         />
       </div>
     </section>
@@ -78,7 +94,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { fetchPackageLogs, fetchPackages, packageOut, updatePackage } from '../../api'
+import { fetchPackageLogs, fetchPackages, packageOut, updatePackage, assignGrilles } from '../../api'
 
 const phonePattern = /^1\d{10}$/
 
@@ -88,6 +104,8 @@ const loading = ref(false)
 const logLoading = ref(false)
 const logVisible = ref(false)
 const editVisible = ref(false)
+const assignLoading = ref(false)
+const assigningId = ref('')
 const editingId = ref(0)
 const editFormRef = ref(null)
 
@@ -184,6 +202,36 @@ async function submitEdit() {
   }
 }
 
+// 入柜功能
+async function assignToGrille(row) {
+  try {
+    await ElMessageBox.confirm(`确认将包裹 ${row.logisticsId} 入柜？`, '入柜确认', {
+      confirmButtonText: '确认入柜',
+      cancelButtonText: '取消',
+      type: 'info'
+    })
+
+    assignLoading.value = true
+    assigningId.value = row.logisticsId
+
+    // 调用入柜API
+    const payload = {
+      logistics_ids: [row.logisticsId]
+    }
+
+    await assignGrilles(payload)
+    ElMessage.success('包裹入柜成功')
+    loadPackages() // 刷新列表
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error?.response?.data?.msg || error?.message || '入柜失败')
+    }
+  } finally {
+    assignLoading.value = false
+    assigningId.value = ''
+  }
+}
+
 async function openLogs(row) {
   logLoading.value = true
   logVisible.value = true
@@ -227,5 +275,28 @@ onMounted(loadPackages)
   .toolbar {
     grid-template-columns: 1fr;
   }
+}
+
+.status-tag {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-created {
+  background-color: #FFF7E6;
+  color: #FA8C16;
+}
+
+.status-stored {
+  background-color: #E6F7FF;
+  color: #1890FF;
+}
+
+.status-picked {
+  background-color: #F6FFED;
+  color: #52C41A;
 }
 </style>

@@ -159,9 +159,14 @@
             <el-button v-if="formCurrentPage < formTotalPages" type="primary" @click="nextFormPage">
               下一步 <el-icon><ArrowRight /></el-icon>
             </el-button>
-            <el-button v-if="formCurrentPage === formTotalPages" type="success" :loading="submitting" @click="submitInbound">
-              生成取件码并入柜
-            </el-button>
+            <div class="button-group" v-if="formCurrentPage === formTotalPages">
+              <el-button type="info" :loading="creatingOnly" @click="submitOnlyPackage">
+                📦 仅建立包裹
+              </el-button>
+              <el-button type="success" :loading="submitting" @click="submitInbound">
+                ✅ 生成取件码并入柜
+              </el-button>
+            </div>
           </div>
 
           <!-- 入柜结果 -->
@@ -172,9 +177,16 @@
             <span>🔑 取件码：{{ result.pickup_code }}</span>
             <span>📋 包裹ID：{{ result.logisticsId }}</span>
           </div>
+          <div class="result-box" v-else-if="onlyPackageResult">
+            <strong>📦 包裹建立成功（未入柜）</strong>
+            <span>📱 收件人：{{ onlyPackageResult.receiverPhone }}</span>
+            <span>📋 包裹ID：{{ onlyPackageResult.logisticsId }}</span>
+            <span>⏰ 建立时间：{{ onlyPackageResult.createdAt }}</span>
+            <span>💡 提示：请在包裹列表中进行后续入柜操作</span>
+          </div>
           <div class="result-box" v-else>
             <strong>📝 等待入柜</strong>
-            <span>完成表单填写后，点击"生成取件码并入柜"按钮。</span>
+            <span>完成表单填写后，点击"生成取件码并入柜"或"仅建立包裹"按钮。</span>
           </div>
         </section>
 
@@ -267,7 +279,9 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const formRef = ref(null)
 const dashboardLoading = ref(false)
 const submitting = ref(false)
+const creatingOnly = ref(false)
 const result = ref(null)
+const onlyPackageResult = ref(null)
 const grilles = ref([])
 const packages = ref([])
 const activeGrilleId = ref('')
@@ -478,6 +492,11 @@ function applyInboundResult(item) {
   }
 }
 
+function applyOnlyPackageResult(item) {
+  // 将新建立的包裹添加到列表顶部
+  packages.value = [item, ...packages.value.filter((current) => current.logisticsId !== item.logisticsId)]
+}
+
 // 填充演示数据
 function fillDemo() {
   // 先跳转到第一页
@@ -515,6 +534,43 @@ function fillDemo() {
   }
 
   ElMessage.success('演示数据已填充')
+}
+
+// 仅建立包裹（不入柜）
+async function submitOnlyPackage() {
+  // 清除验证状态
+  formRef.value?.clearValidate()
+
+  // 验证所有字段（不包括格口选择）
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) {
+    ElMessage.warning('请填写完整的表单信息')
+    return
+  }
+
+  creatingOnly.value = true
+  try {
+    const payload = { ...form }
+    // 移除格口ID字段
+    delete payload.preferredGrilleId
+
+    const created = await createItem(payload)
+    onlyPackageResult.value = created.data
+    applyOnlyPackageResult(created.data)
+
+    ElMessage.success('📦 包裹已建立，可在列表中进行后续入柜操作')
+
+    // 5秒后清除结果提示
+    setTimeout(() => {
+      if (onlyPackageResult.value) {
+        onlyPackageResult.value = null
+      }
+    }, 5000)
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.msg || error?.message || '建立包裹失败')
+  } finally {
+    creatingOnly.value = false
+  }
 }
 
 async function submitInbound() {
@@ -582,6 +638,7 @@ onMounted(loadDashboard)
 </script>
 
 <style scoped>
+/* ... 保持原有样式 ... */
 .courier-page {
   padding: 24px 0 36px;
 }
@@ -670,6 +727,11 @@ onMounted(loadDashboard)
   gap: 12px;
   padding-top: 16px;
   border-top: 1px solid #f0f0f0;
+}
+
+.button-group {
+  display: flex;
+  gap: 12px;
 }
 
 .confirm-info {

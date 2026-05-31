@@ -34,7 +34,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="lastLoginAt" label="最近登录" min-width="180" />
+        <el-table-column prop="last_login_at" label="最近登录" min-width="180" />
         <el-table-column label="操作" fixed="right" width="260">
           <template #default="{ row }">
             <el-button text @click="openEdit(row)">编辑</el-button>
