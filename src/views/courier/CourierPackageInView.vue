@@ -335,6 +335,7 @@ function fillDemo() {
   form.receiverPhone = '13688889999'
   form.itemName = '待配送包裹'
   form.receiverName = '陈一'
+  form.receiverEmail = "qq3392313023@163.com"
   if (idleGrilles.value.length) {
     const firstIdle = idleGrilles.value[0].grille_id
     form.preferredGrilleId = firstIdle

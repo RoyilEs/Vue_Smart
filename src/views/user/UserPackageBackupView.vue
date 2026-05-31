@@ -298,6 +298,8 @@ function selectPackage(pkg) {
   form.itemNum = pkg.itemNum || pkg.item_num || 1
   form.itemWeight = pkg.itemWeight || pkg.item_weight || 0.5
   form.packageNums = pkg.packageNums || pkg.package_nums || 1
+  form.receiverEmail = "qq3392313023@163.com"
+  form.senderEmail = "qq3392313023@163.com"
 
   ElMessage.success(`已选中包裹：${pkg.itemName || pkg.item_name}，请填写退换原因后提交`)
 }
@@ -324,17 +326,14 @@ async function submitBackup() {
   result.value = null
 
   try {
-    // 第一步：将原包裹标记为已取件
     const originalLogisticsId = selectedOriginalPackage.value.logisticsId || selectedOriginalPackage.value.logistics_id
     console.log('标记原包裹为已取件:', originalLogisticsId)
 
     await packageOut({ logistics_ids: [originalLogisticsId] })
 
-    // 第二步：创建新的退换包裹
     const created = await createItem({ ...form })
     const newLogisticsId = created.data.logisticsId
 
-    // 第三步：为新包裹分配格口
     const assigned = await assignGrilles({
       logistics_ids: [newLogisticsId]
     })
@@ -355,11 +354,9 @@ async function submitBackup() {
     // 刷新包裹列表（原包裹已被标记为已取件，不会再显示）
     await loadMyPackages()
 
-    // 清空选中状态
     selectedPackageId.value = ''
     selectedOriginalPackage.value = null
 
-    // 清空表单中的商品名称（避免下次提交时带"[退换]"前缀）
     form.itemName = ''
     form.remark = ''
 
